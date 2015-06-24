@@ -1,5 +1,5 @@
 from sqlalchemy.ext.declarative import declarative_base,declared_attr
-from sqlalchemy import Column,Integer,String,DateTime,Date,ForeignKey,Numeric,CHAR,Boolean,Text
+from sqlalchemy import Column,Integer,String,DateTime,Date,ForeignKey,ForeignKeyConstraint,Numeric,CHAR,Boolean,Text
 from sqlalchemy.schema import Sequence,Index,MetaData,DDL,CheckConstraint,Table
 from sqlalchemy.sql.expression import text,alias
 from sqlalchemy.orm import relationship,backref,object_session,sessionmaker
@@ -1181,6 +1181,63 @@ CREATE OR REPLACE RULE log_stocktype AS ON UPDATE TO stock
 ""","""
 DROP RULE log_stocktype ON stock
 """)
+
+# Event log system tables
+class EventType(Base):
+    __tablename__='event_types'
+    id=Column('id',String(),nullable=False,primary_key=True,doc=
+              "Also used as a slug in the web interface")
+    description=Column('description',String(),nullable=False)
+    interval=Column('default_interval',Integer,nullable=True,doc=
+                    "Default repeat interval in days")
+
+class EventDetailTemplate(Base):
+    __tablename__='event_detail_templates'
+    eventtype_id=Column('eventtype_id',String(),
+                        ForeignKey('event_types.id'),
+                        nullable=False,primary_key=True)
+    eventtype=relationship(EventType,backref='templates')
+    slug=Column(String(),nullable=False,primary_key=True)
+    priority=Column(Integer,nullable=False,doc="Used to set order of fields")
+    description=Column(String(),nullable=False)
+    enabled=Column(Boolean,nullable=False)
+    required=Column(Boolean,nullable=False)
+    datatype=Column(String(),nullable=False,doc="Controls validation of "
+                    "new data") # Use an enum?
+
+event_seq=Sequence('event_seq')
+class Event(Base):
+    __tablename__='events'
+    id=Column('id',Integer,event_seq,nullable=False,primary_key=True)
+    eventtype_id=Column('eventtype_id',String(),
+                        ForeignKey('event_types.id'),
+                        nullable=False,primary_key=True)
+    eventtype=relationship(EventType,backref='events')
+    user_id=Column('user',Integer,ForeignKey('users.id'),nullable=False)
+    user=relationship(User,backref='events')
+    time=Column('time',DateTime,nullable=False,
+                server_default=func.current_timestamp())
+    deadline=Column('deadline',Date,nullable=True)
+    note=Column(String(),nullable=False)
+
+class EventDetail(Base):
+    __tablename__='event_details'
+    __table_args__=(
+        ForeignKeyConstraint(
+            ['eventtype_id','slug'],
+            ['event_detail_templates.eventtype_id','event_detail_templates.slug']),
+        ForeignKeyConstraint(
+            ['id','eventtype_id'],
+            ['events.id','events.eventtype_id']),
+        )
+    id=Column('id',Integer,nullable=False,
+              primary_key=True)
+    eventtype_id=Column('eventtype_id',String(),nullable=False,primary_key=True)
+    slug=Column('slug',String(),
+                nullable=False,primary_key=True)
+    template=relationship(EventDetailTemplate)
+    event=relationship(Event,backref='details')
+    data=Column('data',String(),nullable=False)
 
 # Add indexes here
 Index('translines_transid_key',Transline.transid)
